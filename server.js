@@ -8,12 +8,12 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 
-const GUILD_ID = '1404816777841741894'; // Twój serwer
+const GUILD_ID = '1404816777841741894'; // ID Twojego serwera
 
 // Endpoint do logowania przez Discord
 app.get('/auth/discord', (req, res) => {
     const redirect_uri = process.env.REDIRECT_URI;
-    // Dodajemy scope "guilds"
+    // dodajemy scope "guilds" żeby móc sprawdzić członkostwo
     const authorizeUrl = `https://discord.com/api/oauth2/authorize?client_id=${process.env.CLIENT_ID}&redirect_uri=${encodeURIComponent(redirect_uri)}&response_type=code&scope=identify%20email%20guilds`;
     res.redirect(authorizeUrl);
 });
@@ -24,7 +24,7 @@ app.get('/auth/discord/callback', async (req, res) => {
     if (!code) return res.status(400).send('Brak kodu autoryzacyjnego.');
 
     try {
-        // Wymiana code na token
+        // Pobierz token dostępu
         const tokenResponse = await axios.post(
             'https://discord.com/api/oauth2/token',
             new URLSearchParams({
@@ -40,29 +40,26 @@ app.get('/auth/discord/callback', async (req, res) => {
 
         const { access_token } = tokenResponse.data;
 
-        // Dane użytkownika
+        // Pobierz listę serwerów użytkownika
+        const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+            headers: { Authorization: `Bearer ${access_token}` }
+        });
+
+        const guilds = guildsResponse.data;
+        const isMember = guilds.some(g => g.id === GUILD_ID);
+
+        if (!isMember) {
+            return res.status(403).send('<h1>❌ Brak dostępu</h1><p>Musisz być członkiem wymaganego serwera Discord, aby się zalogować.</p>');
+        }
+
+        // Jeśli jest członkiem — pobierz dane użytkownika
         const userResponse = await axios.get('https://discord.com/api/users/@me', {
             headers: { Authorization: `Bearer ${access_token}` }
         });
 
         const user = userResponse.data;
 
-        // Lista serwerów użytkownika
-        const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
-            headers: { Authorization: `Bearer ${access_token}` }
-        });
-
-        const guilds = guildsResponse.data;
-
-        // Sprawdzenie czy jest na danym serwerze
-        const isMember = guilds.some(g => g.id === GUILD_ID);
-
-        if (!isMember) {
-            return res.status(403).send('<h1>Brak dostępu</h1><p>Nie jesteś członkiem wymaganego serwera Discord.</p>');
-        }
-
-        // Jeśli jest członkiem
-        res.send(`<h1>Witaj ${user.username}#${user.discriminator}</h1><p>Email: ${user.email || 'brak emaila'}</p><p>✅ Jesteś na wymaganym serwerze!</p>`);
+        res.send(`<h1>✅ Witaj ${user.username}#${user.discriminator}</h1><p>Email: ${user.email || 'brak emaila'}</p>`);
     } catch (error) {
         console.error(error.response?.data || error.message);
         res.status(500).send('Błąd podczas logowania przez Discord.');
